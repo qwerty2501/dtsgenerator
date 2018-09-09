@@ -3,6 +3,7 @@ import { OpenAPIV3 } from 'openapi-types';
 import ReferenceResolver from './referenceResolver';
 import { checkOpenAPIV3RefereunceObject, checkOpenAPIV3SchemaContentObject, getSubSchema, JsonScehmaContentObject, JsonSchemaContent, NormalizedJsonSchema, OpenAPIV3OperationObject, Schema } from './schema';
 import SchemaConvertor from './schemaConvertor';
+import SchemaId from './schemaId';
 import * as utils from './utils';
 
 const debug = Debug('dtsgen');
@@ -72,7 +73,6 @@ export default class DtsGenerator {
             return [Object.assign({}, schema, { content })];
         } else if (checkOpenAPIV3SchemaContentObject(content)) {
             const work = content as OpenAPIV3OperationObject;
-            const baseId = '#paths/' + work.operationId ? work.operationId! : work.namespaces.join('/');
             const results: NormalizedJsonSchema[] = [];
             if (work.parameters) {
                 const parameters = work.parameters.map((parameter) => {
@@ -106,16 +106,20 @@ export default class DtsGenerator {
                         if (next.properties) {
                             const s = normalizeSchema(target.schema);
                             next.properties[target.name] = s;
+                            if (target.required && next.required) {
+                                next.required = next.required.concat(target.name);
+                            }
                         }
 
                         return next;
                     },
                         {
-                            id: baseId.concat('/pathParameter'),
                             type: 'object',
                             properties: {},
+                            required: [],
                         } as JsonSchemaOrg.Draft04.Schema);
                     results.push(Object.assign({}, schema, {
+                        id: new SchemaId('pathParameter', []),
                         content: parameterObject,
                     }));
                 }

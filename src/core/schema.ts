@@ -11,7 +11,6 @@ export type SchemaType = 'Draft04' | 'Draft07';
 
 export const openAPIV3Operation: unique symbol = Symbol();
 export interface OpenAPIV3OperationObject extends OpenAPIV3.OperationObject {
-    namespaces: string[];
     [openAPIV3Operation]: any;
 }
 
@@ -145,11 +144,13 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
         }
     };
 
-    const walkOpenAPIV3Operation = (op: OpenAPIV3.OperationObject | undefined, method: string, path: string, parentIds: string[]) => {
+    const walkOpenAPIV3Operation = (op: OpenAPIV3.OperationObject | undefined, method: string, path: string, paths: string[], parentIds: string[]) => {
         if (op == null || typeof op !== 'object') {
             return;
         }
-        const operation: OpenAPIV3OperationObject = { ...op, namespaces: ['$'].concat(path.split('/').map((s) => s.replace(/^$/, '\$\$').replace(/^{(.*)}$/, '\$$1')), method), [openAPIV3Operation]: null };
+        const namespaces = paths.concat(typeof op.operationId === 'string' ? op.operationId : path.split('/').map((s) => s.replace(/^$/, '\$\$').replace(/^{(.*)}$/, '$$$1').concat(method)));
+        const operation: OpenAPIV3OperationObject = { ...op, [openAPIV3Operation]: null };
+        setId(schema.type, operation, namespaces.concat('operation').join('/'));
         const id = getId(schema.type, operation);
         parentIds = findId(operation, id, parentIds);
 
@@ -163,7 +164,7 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
     };
 
 
-    const walkOpenAPIV3Paths = (pathObject: OpenAPIV3.PathObject, parentIds: string[]) => {
+    const walkOpenAPIV3Paths = (pathObject: OpenAPIV3.PathObject, paths: string[], parentIds: string[]) => {
         if (pathObject == null || typeof pathObject !== 'object') {
             return;
         }
@@ -171,7 +172,7 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
             const pathItem = pathObject[path];
             for (const operation of [['get', pathItem.get], ['post', pathItem.post], ['put', pathItem.put], ['patch', pathItem.patch], ['delete', pathItem.delete], ['head', pathItem.head]]) {
                 const method = operation[0] as string;
-                walkOpenAPIV3Operation(operation[1] as OpenAPIV3.OperationObject, method, path, parentIds);
+                walkOpenAPIV3Operation(operation[1] as OpenAPIV3.OperationObject, method, path, paths, parentIds);
             }
         }
     };
@@ -211,7 +212,7 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
         if (schema.openApiVersion === 3) {
             const obj = s as any;
             if (obj.paths) {
-                walkOpenAPIV3Paths(obj.paths, parentIds);
+                walkOpenAPIV3Paths(obj.paths, paths.concat('paths'), parentIds);
             }
 
             if (obj.headers) {
