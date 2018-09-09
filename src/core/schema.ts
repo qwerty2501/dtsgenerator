@@ -224,7 +224,7 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
 
 
             if (obj.components) {
-                walkObject(obj.components, paths.concat('components'), parentIds);
+                walk(obj.components, paths.concat('components'), parentIds);
             }
 
             if (obj.schemas) {
