@@ -1,7 +1,7 @@
 import 'cross-fetch/polyfill';
 import Debug from 'debug';
 import { parseFileContent } from '../utils';
-import { getSubSchema, parseSchema, Schema, searchAllSubSchema } from './jsonSchema';
+import { getSubSchema, parseSchema, Schema, searchAllSubSchema } from './schema';
 import SchemaId from './schemaId';
 
 const debug = Debug('dtsgen');

@@ -1,11 +1,11 @@
 import * as JsonPointer from '../jsonPointer';
-import { NormalizedSchema, Schema } from './jsonSchema';
+import { NormalizedJsonSchema, Schema } from './schema';
 import SchemaId from './schemaId';
 import { DefaultTypeNameConvertor, TypeNameConvertor } from './typeNameConvertor';
 import WriteProcessor from './writeProcessor';
 
 export default class SchemaConvertor {
-    constructor(private processor: WriteProcessor, private convertor: TypeNameConvertor = DefaultTypeNameConvertor) {}
+    constructor(private processor: WriteProcessor, private convertor: TypeNameConvertor = DefaultTypeNameConvertor) { }
 
     private getLastTypeName(id: SchemaId): string {
         const names = this.convertor(id);
@@ -90,7 +90,7 @@ export default class SchemaConvertor {
         }
     }
 
-    public outputComments(schema: NormalizedSchema): void {
+    public outputComments(schema: NormalizedJsonSchema): void {
         const content = schema.content;
         const comments = [];
         if ('$comment' in content) {
@@ -110,19 +110,19 @@ export default class SchemaConvertor {
         this.processor.outputJSDoc(...comments);
     }
 
-    public outputPropertyName(_schema: NormalizedSchema, propertyName: string, required: string[] | undefined): void {
+    public outputPropertyName(_schema: NormalizedJsonSchema, propertyName: string, required: string[] | undefined): void {
         const optionalProperty = required == null || required.indexOf(propertyName) < 0;
         this.processor.outputKey(propertyName, optionalProperty).output(': ');
     }
 
-    public outputPropertyAttribute(schema: NormalizedSchema): void {
+    public outputPropertyAttribute(schema: NormalizedJsonSchema): void {
         const content = schema.content;
         if ('readOnly' in content && content.readOnly) {
             this.processor.output('readonly ');
         }
     }
 
-    public outputArrayedType<T>(schema: NormalizedSchema, types: T[], output: (t: T, index: number) => void, terminate: boolean, outputOptional = true): void {
+    public outputArrayedType<T>(schema: NormalizedJsonSchema, types: T[], output: (t: T, index: number) => void, terminate: boolean, outputOptional = true): void {
         if (!terminate) {
             this.processor.output('(');
         }
@@ -138,7 +138,7 @@ export default class SchemaConvertor {
         this.outputTypeNameTrailer(schema, terminate, outputOptional);
     }
 
-    public outputTypeIdName(schema: NormalizedSchema, currentSchema: Schema, terminate = true, outputOptional = true): void {
+    public outputTypeIdName(schema: NormalizedJsonSchema, currentSchema: Schema, terminate = true, outputOptional = true): void {
         const typeName = this.getTypename(schema.id, currentSchema);
         typeName.forEach((type, index) => {
             const isLast = index === typeName.length - 1;
@@ -167,17 +167,17 @@ export default class SchemaConvertor {
         }
         return result;
     }
-    public outputPrimitiveTypeName(schema: NormalizedSchema, typeName: string, terminate = true, outputOptional = true): void {
+    public outputPrimitiveTypeName(schema: NormalizedJsonSchema, typeName: string, terminate = true, outputOptional = true): void {
         this.processor.outputType(typeName, true);
         this.outputTypeNameTrailer(schema, terminate, outputOptional);
     }
-    public outputStringTypeName(schema: NormalizedSchema, typeName: string, terminate: boolean, outputOptional = true): void {
+    public outputStringTypeName(schema: NormalizedJsonSchema, typeName: string, terminate: boolean, outputOptional = true): void {
         if (typeName) {
             this.processor.output(typeName);
         }
         this.outputTypeNameTrailer(schema, terminate, outputOptional);
     }
-    private outputTypeNameTrailer(schema: NormalizedSchema, terminate: boolean, outputOptional: boolean): void {
+    private outputTypeNameTrailer(schema: NormalizedJsonSchema, terminate: boolean, outputOptional: boolean): void {
         if (terminate) {
             this.processor.output(';');
         }
@@ -188,7 +188,7 @@ export default class SchemaConvertor {
             this.processor.outputLine();
         }
     }
-    private outputOptionalInformation(schema: NormalizedSchema, terminate: boolean): void {
+    private outputOptionalInformation(schema: NormalizedJsonSchema, terminate: boolean): void {
         const format = schema.content.format;
         const pattern = schema.content.pattern;
         if (!format && !pattern) {

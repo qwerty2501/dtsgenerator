@@ -1,6 +1,7 @@
 import Debug from 'debug';
-import { getSubSchema, JsonSchema, NormalizedSchema, Schema } from './jsonSchema';
+import { OpenAPIV3 } from 'openapi-types';
 import ReferenceResolver from './referenceResolver';
+import { checkOpenAPIV3RefereunceObject, checkOpenAPIV3SchemaContentObject, getSubSchema, JsonScehmaContentObject, JsonSchemaContent, NormalizedJsonSchema, OpenAPIV3OperationObject, Schema } from './schema';
 import SchemaConvertor from './schemaConvertor';
 import * as utils from './utils';
 
@@ -9,9 +10,9 @@ const typeMarker = Symbol();
 
 export default class DtsGenerator {
 
-    private currentSchema!: NormalizedSchema;
+    private currentSchema!: NormalizedJsonSchema;
 
-    constructor(private resolver: ReferenceResolver, private convertor: SchemaConvertor) {}
+    constructor(private resolver: ReferenceResolver, private convertor: SchemaConvertor) { }
 
     public async generate(): Promise<string> {
         debug('generate type definition files.');
@@ -44,36 +45,92 @@ export default class DtsGenerator {
     }
 
     private walkSchema(schema: Schema): void {
-        const normalized = this.normalizeContent(schema);
-        this.currentSchema = normalized;
-        this.convertor.outputComments(normalized);
+        for (const normalized of this.normalizeContent(schema)) {
+            this.currentSchema = normalized;
+            this.convertor.outputComments(normalized);
 
-        const type = normalized.content.type;
-        switch (type) {
-            case 'object':
-            case 'any':
-                return this.generateTypeModel(normalized);
-            case 'array':
-                return this.generateTypeCollection(normalized);
-            default:
-                return this.generateDeclareType(normalized);
+            const type = normalized.content.type;
+            switch (type) {
+                case 'object':
+                case 'any':
+                    return this.generateTypeModel(normalized);
+                case 'array':
+                    return this.generateTypeCollection(normalized);
+                default:
+                    return this.generateDeclareType(normalized);
+            }
         }
     }
 
-    private normalizeContent(schema: Schema, pointer?: string): NormalizedSchema {
+    private normalizeContent(schema: Schema, pointer?: string): NormalizedJsonSchema[] {
         if (pointer != null) {
             schema = getSubSchema(schema, pointer);
         }
         let content = schema.content;
         if (typeof content === 'boolean') {
             content = content ? {} : { not: {} };
+            return [Object.assign({}, schema, { content })];
+        } else if (checkOpenAPIV3SchemaContentObject(content)) {
+            const work = content as OpenAPIV3OperationObject;
+            const baseId = '#paths/' + work.operationId ? work.operationId! : work.namespaces.join('/');
+            const results: NormalizedJsonSchema[] = [];
+            if (work.parameters) {
+                const parameters = work.parameters.map((parameter) => {
+                    if (checkOpenAPIV3RefereunceObject(parameter)) {
+                        const refParameter = parameter as OpenAPIV3.ReferenceObject;
+                        return this.resolver.dereference(refParameter.$ref).content as OpenAPIV3.ParameterObject;
+                    } else {
+                        return parameter as OpenAPIV3.ParameterObject;
+                    }
+                });
+
+                const normalizeSchema = (s: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined) => {
+                    s = Object.assign({}, s);
+                    if (checkOpenAPIV3RefereunceObject(s)) {
+                        s = this.resolver.dereference(s.$ref).content as OpenAPIV3.SchemaObject | undefined;
+                    }
+                    if (s !== undefined) {
+                        return Object.assign({}, s, { type: s.type !== 'object' && s.type !== 'array' ? s.type : 'string' });
+                    }
+                    return {
+                        type: 'string',
+                    } as OpenAPIV3.SchemaObject;
+                };
+
+                const pathParameters = parameters.filter((parameter) => parameter.in === 'path');
+                let parameterObject: JsonScehmaContentObject | undefined;
+                if (pathParameters.length > 0) {
+                    parameterObject = pathParameters.reduce((prev: JsonSchemaOrg.Draft04.Schema, target) => {
+                        const next = Object.assign({}, prev);
+
+                        if (next.properties) {
+                            const s = normalizeSchema(target.schema);
+                            next.properties[target.name] = s;
+                        }
+
+                        return next;
+                    },
+                        {
+                            id: baseId.concat('/pathParameter'),
+                            type: 'object',
+                            properties: {},
+                        } as JsonSchemaOrg.Draft04.Schema);
+                    results.push(Object.assign({}, schema, {
+                        content: parameterObject,
+                    }));
+                }
+
+            }
+
+            return results;
         } else {
+
             if (content.allOf) {
                 const work = content;
                 for (let sub of content.allOf) {
                     if (typeof sub === 'object' && sub.$ref) {
                         const ref = this.resolver.dereference(sub.$ref);
-                        sub = this.normalizeContent(ref).content;
+                        sub = this.normalizeContent(ref)[0].content;
                     }
                     utils.mergeSchema(work, sub);
                 }
@@ -87,15 +144,17 @@ export default class DtsGenerator {
                 const reduced = utils.reduceTypes(types);
                 content.type = reduced.length === 1 ? reduced[0] : reduced;
             }
+
+            return [Object.assign({}, schema, { content })];
         }
-        return Object.assign({}, schema, { content });
+
     }
-    private generateDeclareType(schema: NormalizedSchema): void {
+    private generateDeclareType(schema: NormalizedJsonSchema): void {
         this.convertor.outputExportType(schema.id);
         this.generateTypeProperty(schema, true);
     }
 
-    private generateTypeModel(schema: NormalizedSchema): void {
+    private generateTypeModel(schema: NormalizedJsonSchema): void {
         this.convertor.startInterfaceNest(schema.id);
         if (schema.content.type === 'any') {
             this.convertor.outputRawValue('[name: string]: any; // any', true);
@@ -104,41 +163,46 @@ export default class DtsGenerator {
         this.convertor.endInterfaceNest();
     }
 
-    private generateTypeCollection(schema: NormalizedSchema): void {
+    private generateTypeCollection(schema: NormalizedJsonSchema): void {
         this.convertor.outputExportType(schema.id);
         this.generateArrayTypeProperty(schema, true);
     }
 
-    private generateProperties(baseSchema: NormalizedSchema): void {
+    private generateProperties(baseSchema: NormalizedJsonSchema): void {
         const content = baseSchema.content;
         if (content.additionalProperties) {
             this.convertor.outputRawValue('[name: string]: ');
-            const schema = this.normalizeContent(baseSchema, '/additionalProperties');
-            if (content.additionalProperties === true) {
-                this.convertor.outputStringTypeName(schema, 'any', true);
-            } else {
-                this.generateTypeProperty(schema, true);
+
+            for (const schema of this.normalizeContent(baseSchema, '/additionalProperties')) {
+                if (content.additionalProperties === true) {
+                    this.convertor.outputStringTypeName(schema, 'any', true);
+                } else {
+                    this.generateTypeProperty(schema, true);
+                }
             }
         }
         if (content.properties) {
             for (const propertyName of Object.keys(content.properties)) {
-                const schema = this.normalizeContent(baseSchema, '/properties/' + propertyName);
-                this.convertor.outputComments(schema);
-                this.convertor.outputPropertyAttribute(schema);
-                this.convertor.outputPropertyName(schema, propertyName, baseSchema.content.required);
-                this.generateTypeProperty(schema);
+                for (const schema of this.normalizeContent(baseSchema, '/properties/' + propertyName)) {
+                    this.convertor.outputComments(schema);
+                    this.convertor.outputPropertyAttribute(schema);
+                    this.convertor.outputPropertyName(schema, propertyName, baseSchema.content.required);
+                    this.generateTypeProperty(schema);
+                }
             }
         }
     }
-    private generateTypeProperty(schema: NormalizedSchema, terminate = true): void {
+    private generateTypeProperty(schema: NormalizedJsonSchema, terminate = true): void {
         const content = schema.content;
         if (content.$ref) {
             const ref = this.resolver.dereference(content.$ref);
             if (ref.id == null) {
                 throw new Error('target referenced id is nothing: ' + content.$ref);
             }
-            const refSchema = this.normalizeContent(ref);
-            return this.convertor.outputTypeIdName(refSchema, this.currentSchema, terminate);
+            for (const refSchema of this.normalizeContent(ref)) {
+                this.convertor.outputTypeIdName(refSchema, this.currentSchema, terminate);
+            }
+            return;
         }
         if (content.anyOf || content.oneOf) {
             this.generateArrayedType(schema, content.anyOf, '/anyOf/', terminate);
@@ -164,27 +228,31 @@ export default class DtsGenerator {
             this.generateType(schema, terminate);
         }
     }
-    private generateArrayedType(baseSchema: NormalizedSchema, contents: JsonSchema[] | undefined, path: string, terminate: boolean): void {
+    private generateArrayedType(baseSchema: NormalizedJsonSchema, contents: JsonSchemaContent[] | undefined, path: string, terminate: boolean): void {
         if (contents) {
             this.convertor.outputArrayedType(baseSchema, contents, (_content, index) => {
-                const schema = this.normalizeContent(baseSchema, path + index);
-                if (schema.id.isEmpty()) {
-                    this.generateTypeProperty(schema, false);
-                } else {
-                    this.convertor.outputTypeIdName(schema, this.currentSchema, false);
+                for (const schema of this.normalizeContent(baseSchema, path + index)) {
+                    if (schema.id.isEmpty()) {
+                        this.generateTypeProperty(schema, false);
+                    } else {
+                        this.convertor.outputTypeIdName(schema, this.currentSchema, false);
+                    }
                 }
+
             }, terminate);
         }
     }
 
 
-    private generateArrayTypeProperty(schema: NormalizedSchema, terminate = true): void {
+    private generateArrayTypeProperty(schema: NormalizedJsonSchema, terminate = true): void {
         const items = schema.content.items;
         const minItems = schema.content.minItems;
         if (items == null) {
             this.convertor.outputStringTypeName(schema, 'any[]', terminate);
         } else if (!Array.isArray(items)) {
-            this.generateTypeProperty(this.normalizeContent(schema, '/items'), false);
+            for (const itemSchema of this.normalizeContent(schema, '/items')) {
+                this.generateTypeProperty(itemSchema, false);
+            }
             this.convertor.outputStringTypeName(schema, '[]', terminate);
         } else if (items.length === 0 && minItems === undefined) {
             this.convertor.outputStringTypeName(schema, 'any[]', terminate);
@@ -201,11 +269,12 @@ export default class DtsGenerator {
                         this.convertor.outputRawValue(', ');
                     }
                     if (i < items.length) {
-                        const type = this.normalizeContent(schema, '/items/' + i);
-                        if (type.id.isEmpty()) {
-                            this.generateTypeProperty(type, false);
-                        } else {
-                            this.convertor.outputTypeIdName(type, this.currentSchema, false);
+                        for (const type of this.normalizeContent(schema, '/items/' + i)) {
+                            if (type.id.isEmpty()) {
+                                this.generateTypeProperty(type, false);
+                            } else {
+                                this.convertor.outputTypeIdName(type, this.currentSchema, false);
+                            }
                         }
                     } else {
                         if (i < effectiveMaxItems - 1) {
@@ -224,7 +293,7 @@ export default class DtsGenerator {
         }
     }
 
-    private generateType(schema: NormalizedSchema, terminate: boolean, outputOptional = true): void {
+    private generateType(schema: NormalizedJsonSchema, terminate: boolean, outputOptional = true): void {
         const type = schema.content.type;
         if (type == null) {
             this.convertor.outputPrimitiveTypeName(schema, 'any', terminate, outputOptional);
@@ -242,7 +311,7 @@ export default class DtsGenerator {
             }
         }
     }
-    private generateTypeName(schema: NormalizedSchema, type: string, terminate: boolean, outputOptional = true): void {
+    private generateTypeName(schema: NormalizedJsonSchema, type: string, terminate: boolean, outputOptional = true): void {
         const tsType = utils.toTSType(type, schema.content);
         if (tsType) {
             this.convertor.outputPrimitiveTypeName(schema, tsType, terminate, outputOptional);

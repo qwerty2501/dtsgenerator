@@ -1,6 +1,6 @@
 import DtsGenerator from './dtsGenerator';
-import { parseSchema } from './jsonSchema';
 import ReferenceResolver from './referenceResolver';
+import { parseSchema } from './schema';
 import SchemaConvertor from './schemaConvertor';
 import { TypeNameConvertor } from './typeNameConvertor';
 import WriteProcessor, { WriteProcessorOptions } from './writeProcessor';
