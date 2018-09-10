@@ -69,8 +69,8 @@ export function getSubSchema(rootSchema: Schema, pointer: string, id?: SchemaId)
 export function getId(type: SchemaType, content: any): string | undefined {
     return content[getIdPropertyName(type)];
 }
-export function checkOpenAPIV3SchemaContentObject(schemaContentObject: SchemaContentObject): schemaContentObject is OpenAPIV3SchemaContentObject {
-    return openAPIV3Operation in schemaContentObject;
+export function checkOpenAPIV3SchemaContentObject(schemaContentObject: SchemaContent): schemaContentObject is OpenAPIV3SchemaContentObject {
+    return typeof schemaContentObject === 'object' && openAPIV3Operation in schemaContentObject;
 }
 
 export function checkOpenAPIV3RefereunceObject(obj: OpenAPIV3.ReferenceObject | any): obj is OpenAPIV3.ReferenceObject {
@@ -150,7 +150,7 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
         }
         const namespaces = paths.concat(typeof op.operationId === 'string' ? op.operationId : path.split('/').map((s) => s.replace(/^$/, '\$\$').replace(/^{(.*)}$/, '$$$1').concat(method)));
         const operation: OpenAPIV3OperationObject = { ...op, [openAPIV3Operation]: null };
-        setId(schema.type, operation, namespaces.concat('operation').join('/'));
+        setId(schema.type, operation, namespaces.join('/'));
         const id = getId(schema.type, operation);
         parentIds = findId(operation, id, parentIds);
 

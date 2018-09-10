@@ -16,7 +16,7 @@ export default class SchemaConvertor {
         }
     }
 
-    public buildSchemaMergedMap(schemas: IterableIterator<Schema>, typeMarker: symbol): any {
+    public buildSchemaMergedMap(schemas: Schema[], typeMarker: symbol): any {
         const map: any = {};
         for (const type of schemas) {
             const names = this.convertor(type.id);

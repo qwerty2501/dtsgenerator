@@ -100,7 +100,7 @@ export default class ReferenceResolver {
         });
     }
 
-    private addSchema(schema: Schema): void {
+    public addSchema(schema: Schema): void {
         const id = schema.id;
         const key = id.getAbsoluteId();
         if (!this.schemaCache.has(key)) {
@@ -114,7 +114,7 @@ export default class ReferenceResolver {
             }
         }
     }
-    private addReference(refId: SchemaId): void {
+    public addReference(refId: SchemaId): void {
         if (!this.referenceCache.has(refId.getAbsoluteId())) {
             debug(` add reference: id=${refId.getAbsoluteId()}`);
             this.referenceCache.set(refId.getAbsoluteId(), undefined);
