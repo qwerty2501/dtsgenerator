@@ -144,6 +144,31 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
         }
     };
 
+
+    const walkArrayRefsOnly = (array: any[], parentIds: string[]) => {
+        for (const target of array) {
+            walkRefsOnly(target, parentIds);
+        }
+    };
+    const walkObjectRefsOnly = (obj: any, parentIds: string[]) => {
+        for (const key of Object.keys(obj)) {
+
+            if (key === '$ref') {
+                findRef(obj, parentIds);
+            } else {
+                walkRefsOnly(obj[key], parentIds);
+            }
+        }
+    };
+
+    const walkRefsOnly = (target: any, parentIds: string[]) => {
+        if (typeof target === 'object') {
+            walkObjectRefsOnly(target, parentIds);
+        } else if ((Array.isArray(target))) {
+            walkArrayRefsOnly(target, parentIds);
+        }
+    };
+
     const walkOpenAPIV3Operation = (op: OpenAPIV3.OperationObject | undefined, method: string, path: string, paths: string[], parentIds: string[]) => {
         if (op == null || typeof op !== 'object') {
             return;
@@ -154,13 +179,7 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
         const id = getId(schema.type, operation);
         parentIds = findId(operation, id, parentIds);
 
-        const obj = op as any;
-        for (const key of Object.keys(obj)) {
-            const field = obj[key];
-            if (key === '$ref') {
-                findRef(field, parentIds);
-            }
-        }
+        walkRefsOnly(op, parentIds);
     };
 
 
@@ -222,8 +241,6 @@ export function searchAllSubSchema(schema: Schema, onFoundSchema: (subSchema: Sc
             if (obj.schema) {
                 walk(obj.schema, paths.concat('schema'), parentIds);
             }
-
-
             if (obj.components) {
                 walk(obj.components, paths.concat('components'), parentIds);
             }

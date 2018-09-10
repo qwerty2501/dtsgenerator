@@ -174,8 +174,8 @@ export default class DtsGenerator {
                         request.content.properties[propertyName] = {
                             $ref: parameterSchema.id.getAbsoluteId(),
                         };
-                        if (request.content.required && parameterSchema.content.required) {
-                            request.content.required = parameterSchema.content.required.length > 0 ? request.content.required.concat(propertyName) : request.content.required;
+                        if (request.content.required && parameterSchema.content.required && parameterSchema.content.required.length > 0) {
+                            request.content.required = request.content.required.concat(propertyName);
                         }
                     }
                     this.resolver.addSchema(parameterSchema);
@@ -202,10 +202,10 @@ export default class DtsGenerator {
                     const bodyContentSchema = this.dereferenceOpenAPIV3Object(bodyContent.schema);
                     const bodyTypeName = DtsGenerator.mediaTypeToTypeNamePrefix(mediaType);
                     const bodyPrefix = singleMedia ? '' : bodyTypeName;
-                    const bodySchema = Object.assign({}, requestSchema, {
+                    const bodySchema = this.normalizeContent(Object.assign({}, requestSchema, {
                         id: new SchemaId(baseId.concat('/', bodyPrefix, 'RequestBody')),
                         content: bodyContentSchema,
-                    } as JsonSchema);
+                    } as JsonSchema));
                     this.resolver.addSchema(bodySchema);
                     results.push(bodySchema);
 
@@ -216,7 +216,7 @@ export default class DtsGenerator {
                         rs.content.properties.body = {
                             $ref: bodySchema.id.getAbsoluteId(),
                         };
-                        if (bodyContentSchema.required && bodyContentSchema.required.length > 0 && rs.content.required) {
+                        if (rs.content.required && bodySchema.content.required && bodySchema.content.required.length > 0) {
                             rs.content.required = rs.content.required.concat('body');
                         }
 
@@ -230,26 +230,28 @@ export default class DtsGenerator {
             results.push(requestSchema);
         }
 
-        const responseSchema = Object.assign({}, schema, {
-            id: new SchemaId(baseId.concat('/', 'response'), []),
-            content: {
-                properties: {},
-                required: [],
-                type: 'object',
-            } as JsonSchemaOrg.Draft04.Schema,
-        });
+
         if (work.responses) {
             const responseKeys = Object.keys(work.responses);
             const singleResponse = responseKeys.length === 1;
             for (const responseKey of responseKeys) {
                 const response = this.dereferenceOpenAPIV3Object(work.responses[responseKey]);
                 const responseSuffix = singleResponse ? '' : responseKey;
+                const responseSchema = Object.assign({}, schema, {
+                    id: new SchemaId(baseId.concat('/', 'response'), []),
+                    content: {
+                        properties: {},
+                        required: [],
+                        type: 'object',
+                    } as JsonSchemaOrg.Draft04.Schema,
+                });
                 if (response.headers) {
                     const responseHeaders = this.dereferenceOpenAPIV3Object(response.headers);
                     const responseHeaderSchema = Object.assign({}, responseSchema, {
-                        id: new SchemaId(baseId.concat('/', 'ResponseHeader', responseSuffix)),
+                        id: new SchemaId(baseId.concat('/', 'ResponseHeader ', responseSuffix)),
                     } as JsonSchema);
-                    for (const responseHeaderKey of Object.keys(responseHeaders)) {
+                    const responseHeaderKeys = Object.keys(responseHeaders);
+                    for (const responseHeaderKey of responseHeaderKeys) {
                         const responseHeader = this.dereferenceOpenAPIV3Object(responseHeaders[responseHeaderKey]);
                         if (responseHeaderSchema.content.properties) {
                             const responseHeaderContentSchema = normalizeSchema(responseHeader.schema);
@@ -257,6 +259,19 @@ export default class DtsGenerator {
                             if (responseHeaderSchema.content.required && responseHeaderContentSchema.required && responseHeaderContentSchema.required.length > 0) {
                                 responseHeaderSchema.content.required = responseHeaderSchema.content.required.concat(responseHeaderKey);
                             }
+                        }
+                    }
+                    if (responseHeaderKeys.length > 0) {
+                        this.resolver.addSchema(responseHeaderSchema);
+                        results.push(responseHeaderSchema);
+                        if (responseSchema.content.properties) {
+                            responseSchema.content.properties.header = {
+                                $ref: responseHeaderSchema.id.getAbsoluteId(),
+                            };
+                            if (responseSchema.content.required) {
+                                responseSchema.content.required = responseSchema.content.required.concat('header');
+                            }
+                            this.resolver.addReference(responseHeaderSchema.id);
                         }
                     }
                 }
@@ -267,11 +282,28 @@ export default class DtsGenerator {
                     for (const responseContentKey of responseContentKeys) {
                         const responseContentPrefix = singleResponseContent ? '' : DtsGenerator.mediaTypeToTypeNamePrefix(responseContentKey);
                         const responseContent = response.content[responseContentKey];
-                        const responseContentSchema = Object.assign({}, responseSchema, {
-                            id: new SchemaId(baseId.concat('/', responseContentPrefix, 'ResponseBody', responseSuffix)),
-                            content: responseContent,
+                        const responseContentSchema = this.normalizeContent(Object.assign({}, responseSchema, {
+                            id: new SchemaId(baseId.concat('/', responseContentPrefix, 'ResponseBody ', responseSuffix)),
+                            content: this.dereferenceOpenAPIV3Object(responseContent.schema),
+                        } as JsonSchema));
+                        this.resolver.addSchema(responseContentSchema);
+                        results.push(responseContentSchema);
+                        const targetResponseSchema = Object.assign({}, responseSchema, {
+                            id: new SchemaId(baseId.concat('/', responseContentPrefix, 'Response ', responseSuffix)),
                         } as JsonSchema);
+                        if (targetResponseSchema.content.properties) {
+                            targetResponseSchema.content.properties.body = {
+                                $ref: responseContentSchema.id.getAbsoluteId(),
+                            };
+                            if (targetResponseSchema.content.required && responseContentSchema.content.required && responseContentSchema.content.required.length > 0) {
+                                targetResponseSchema.content.required = targetResponseSchema.content.required.concat('body');
+                            }
+                            this.resolver.addReference(responseContentSchema.id);
+                            results.push(targetResponseSchema);
+                        }
                     }
+                } else if (responseSchema.content.properties && Object.keys(responseSchema.content.properties).length > 0) {
+                    results.push(responseSchema);
                 }
             }
 
